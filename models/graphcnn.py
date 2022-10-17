@@ -3,11 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import sys
-sys.path.append("models/")
+sys.path.append("powerful_gnns/models/")
 from mlp import MLP
 
 class GraphCNN(nn.Module):
-    def __init__(self, num_layers, num_mlp_layers, input_dim, hidden_dim, output_dim, final_dropout, learn_eps, graph_pooling_type, neighbor_pooling_type, device):
+    def __init__(self, num_layers, num_mlp_layers, input_dim, hidden_dim, output_dim, final_dropout, learn_eps, graph_pooling_type, neighbor_pooling_type, device,
+                    eps_initialization, eps_freeze):
         '''
             num_layers: number of layers in the neural networks (INCLUDING the input layer)
             num_mlp_layers: number of layers in mlps (EXCLUDING the input layer)
@@ -19,6 +20,8 @@ class GraphCNN(nn.Module):
             neighbor_pooling_type: how to aggregate neighbors (mean, average, or max)
             graph_pooling_type: how to aggregate entire nodes in a graph (mean, average)
             device: which device to use
+            eps_initialization: epslilon initialization method ('zeros', 'random', real value)
+            eps_freeze: If True, freeze epsilon
         '''
 
         super(GraphCNN, self).__init__()
@@ -29,7 +32,16 @@ class GraphCNN(nn.Module):
         self.graph_pooling_type = graph_pooling_type
         self.neighbor_pooling_type = neighbor_pooling_type
         self.learn_eps = learn_eps
-        self.eps = nn.Parameter(torch.zeros(self.num_layers-1))
+        if eps_initialization == "zeros":
+            self.eps = nn.Parameter(torch.zeros(self.num_layers-1))
+        elif eps_initialization == "random":
+            self.eps = nn.Parameter(torch.rand(self.num_layers-1))
+        elif isinstance(eps_initialization, float):
+            self.eps = nn.Parameter(torch.ones(self.num_layers-1)*eps_initialization)
+        else:
+            raise ValueError("Invalid eps initialization method.")
+
+        self.eps.requires_grad = eps_freeze
 
         ###List of MLPs
         self.mlps = torch.nn.ModuleList()
@@ -92,14 +104,15 @@ class GraphCNN(nn.Module):
             start_idx.append(start_idx[i] + len(graph.g))
             edge_mat_list.append(graph.edge_mat + start_idx[i])
         Adj_block_idx = torch.cat(edge_mat_list, 1)
-        Adj_block_elem = torch.ones(Adj_block_idx.shape[1])
+        Adj_block_elem = torch.ones(Adj_block_idx.shape[1], device = self.device)
 
         #Add self-loops in the adjacency matrix if learn_eps is False, i.e., aggregate center nodes and neighbor nodes altogether.
 
         if not self.learn_eps:
             num_node = start_idx[-1]
-            self_loop_edge = torch.LongTensor([range(num_node), range(num_node)])
-            elem = torch.ones(num_node)
+            self_loop_edge = torch.LongTensor([range(num_node), range(num_node)]).to(device=self.device, 
+                non_blocking=False)
+            elem = torch.ones(num_node, device=self.device)
             Adj_block_idx = torch.cat([Adj_block_idx, self_loop_edge], 1)
             Adj_block_elem = torch.cat([Adj_block_elem, elem], 0)
 
