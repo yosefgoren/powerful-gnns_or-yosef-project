@@ -5,7 +5,7 @@ import torch
 from sklearn.model_selection import StratifiedKFold
 
 class S2VGraph(object):
-    def __init__(self, g, label, node_tags=None, node_features=None):
+    def __init__(self, device, g, label, node_tags=None, node_features=None):
         '''
             g: a networkx graph
             label: an integer graph label
@@ -14,6 +14,7 @@ class S2VGraph(object):
             edge_mat: a torch long tensor, contain edge list, will be used to create torch sparse tensor
             neighbors: list of neighbors (without self-loop)
         '''
+        self.device = device
         self.label = label
         self.g = g
         self.node_tags = node_tags
@@ -22,6 +23,22 @@ class S2VGraph(object):
         self.edge_mat = 0
 
         self.max_neighbor = 0
+
+
+        edges = [list(pair) for pair in g.edges()]
+        edges.extend([[i, j] for j, i in edges])
+        self.edge_mat = torch.LongTensor(edges).transpose(0, 1).to(device)
+
+        self.neighbors = [[] for i in range(len(g))]
+        for i, j in g.edges():
+            self.neighbors[i].append(j)
+            self.neighbors[j].append(i)
+        degree_list = []
+        for i in range(len(g)):
+            self.neighbors[i] = self.neighbors[i]
+            degree_list.append(len(self.neighbors[i]))
+        self.max_neighbor = max(degree_list)
+
 
 
 def load_data(dataset, degree_as_tag):
